@@ -1,0 +1,739 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#1f3d38">
+<meta name="description" content="1〜100のタイルを左から小さい順に並べるボードゲーム。CPU対戦と、部屋コードで友達とオンライン対戦。">
+<title>SORTIA</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:ital,wght@0,600;0,700;1,800&family=Zen+Kaku+Gothic+New:wght@400;700&display=swap">
+<style>
+/* Layout: one-screen game table — opponents up top, draw pile + open tiles in the middle, your row at the bottom */
+:root{
+  --felt:#1f3d38; --felt-2:#18322e; --rail:#2b4f48;
+  --ivory:#f4ecda; --ink:#1d2725; --back:#b5492f; --back-2:#9a3c26;
+  --gold:#f0bf52; --text:#e8efe9; --muted:#9db6ae; --good:#7fd19b; --warn:#f19a7c;
+  --num:"Barlow Condensed","Arial Narrow",sans-serif;
+  --body:"Zen Kaku Gothic New","Hiragino Sans","Noto Sans JP",sans-serif;
+  color-scheme:dark;
+}
+html,body{height:100%}
+body{background:var(--felt);color:var(--text);font-family:var(--body);margin:0;
+  background-image:radial-gradient(ellipse at 50% 40%,var(--felt) 0%,var(--felt-2) 100%);}
+#app{max-width:760px;margin:0 auto;padding-block:12px 28px;
+  padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));
+  display:flex;flex-direction:column;gap:14px}
+header{display:flex;align-items:baseline;justify-content:space-between;gap:12px}
+.logo{font-family:var(--num);font-style:italic;font-weight:800;font-size:30px;letter-spacing:.02em;color:var(--ivory);margin:0}
+.logo span{color:var(--gold)}
+.meta{font-size:12px;color:var(--muted);display:flex;gap:8px;align-items:center;flex-wrap:wrap;justify-content:flex-end}
+button{font-family:var(--body);cursor:pointer}
+button:disabled{cursor:default;opacity:.5}
+.link{background:none;border:1px solid var(--rail);color:var(--text);border-radius:999px;padding:5px 12px;font-size:12px}
+.link:focus-visible,.btn:focus-visible,.tile:focus-visible,input:focus-visible{outline:3px solid var(--gold);outline-offset:2px}
+
+.tile{font-family:var(--num);font-weight:700;border:none;border-radius:7px;display:grid;place-items:center;
+  aspect-ratio:3/4;font-size:clamp(18px,5.4vw,26px);color:var(--ink);background:var(--ivory);
+  box-shadow:0 2px 0 #c9bea6,0 3px 6px rgba(0,0,0,.35);padding:0;font-variant-numeric:tabular-nums;position:relative;transition:transform .15s}
+.tile.down{background:repeating-linear-gradient(135deg,var(--back) 0 6px,var(--back-2) 6px 12px);box-shadow:0 2px 0 #6e2a1a,0 3px 6px rgba(0,0,0,.35);color:transparent}
+.tile.ok{outline:3px solid var(--gold);outline-offset:1px;transform:translateY(-3px);animation:pulse 1.1s ease-in-out infinite}
+.tile.sel{outline:3px solid var(--good);outline-offset:1px;transform:translateY(-4px)}
+.tile.flash{animation:pop .6s ease-out}
+.tile.dim{opacity:.45}
+.tile.rot::after{content:"";position:absolute;bottom:4px;left:30%;right:30%;height:2px;background:var(--ink);border-radius:2px}
+@keyframes pulse{50%{outline-color:#fff3c8}}
+@keyframes pop{0%{transform:scale(1.25);box-shadow:0 0 0 6px var(--gold)}}
+@media (prefers-reduced-motion:reduce){.tile.ok{animation:none}.tile.flash{animation:none}}
+
+.opps{display:flex;flex-direction:column;gap:8px}
+.opp{background:rgba(0,0,0,.18);border-radius:10px;padding:8px 10px;display:flex;flex-direction:column;gap:6px}
+.opp.turn{box-shadow:inset 0 0 0 2px var(--gold)}
+.opp-head{display:flex;justify-content:space-between;gap:8px;font-size:12px;color:var(--muted)}
+.opp-head b{color:var(--text);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.mini{display:flex;gap:2px}
+.mini i{flex:1;min-width:0;height:20px;border-radius:3px;background:var(--ivory);color:var(--ink);font:700 11px/20px var(--num);text-align:center;font-style:normal;font-variant-numeric:tabular-nums}
+.mini i.d{background:var(--back)}
+.mini i.f{box-shadow:0 0 0 2px var(--gold)}
+
+.mid{display:grid;grid-template-columns:auto 1fr;gap:14px;align-items:start}
+.pile{width:66px;display:flex;flex-direction:column;gap:4px;align-items:center;font-size:11px;color:var(--muted)}
+.pile .tile{width:100%}
+.pool{min-width:0;display:flex;flex-direction:column;gap:6px}
+.label{font-size:11px;color:var(--muted);letter-spacing:.06em}
+.pool-tiles{display:flex;flex-wrap:wrap;gap:6px;min-height:56px}
+.pool-tiles .tile{width:42px;font-size:20px}
+.empty{font-size:12px;color:var(--muted);align-self:center}
+
+.panel{background:rgba(0,0,0,.22);border-radius:12px;padding:12px;display:flex;flex-direction:column;gap:10px}
+.status{font-size:15px;font-weight:700;line-height:1.5;text-wrap:balance;min-width:0}
+.status small{display:block;font-weight:400;font-size:12px;color:var(--muted)}
+.held{display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+.held .tile{width:56px;font-size:30px;cursor:default}
+.btns{display:flex;flex-wrap:wrap;gap:8px}
+.btn{border:none;border-radius:8px;padding:9px 14px;font-size:13px;font-weight:700;background:var(--rail);color:var(--text)}
+.btn.primary{background:var(--gold);color:var(--ink)}
+.btn.on{background:var(--ivory);color:var(--ink)}
+.pend{display:flex;gap:8px;flex-wrap:wrap}
+.pend .tile{width:46px}
+
+.mine-head{display:flex;justify-content:space-between;align-items:baseline;font-size:12px;color:var(--muted)}
+.mine-head b{color:var(--text);font-size:14px}
+.row{display:grid;grid-template-columns:repeat(auto-fill,minmax(46px,1fr));gap:8px 6px}
+.row .tile{width:100%}
+.dir{font-size:11px;color:var(--muted)}
+.log{font-size:12px;color:var(--muted);display:flex;flex-direction:column;gap:2px;min-height:3em}
+.log div:first-child{color:var(--text)}
+.err{font-size:12px;color:var(--warn);line-height:1.6}
+
+/* home & lobby */
+.hero{display:flex;flex-direction:column;gap:6px;padding-block:18px 4px}
+.hero h1{font-family:var(--num);font-style:italic;font-weight:800;font-size:56px;line-height:1;margin:0;color:var(--ivory)}
+.hero h1 span{color:var(--gold)}
+.hero p{margin:0;font-size:14px;color:var(--muted);line-height:1.7}
+.deco{display:flex;gap:6px;margin-top:6px}
+.deco .tile{width:38px;font-size:20px;pointer-events:none}
+.box{background:rgba(0,0,0,.22);border-radius:12px;padding:14px;display:flex;flex-direction:column;gap:12px}
+.box h2{margin:0;font-size:16px}
+.box p{margin:0;font-size:13px;color:var(--muted);line-height:1.7}
+.seg{display:flex;gap:6px}
+.seg .btn{flex:1}
+.join{display:flex;gap:8px}
+.join input{flex:1;min-width:0;background:var(--felt-2);border:1px solid var(--rail);border-radius:8px;color:var(--text);
+  padding:9px 12px;font:700 18px var(--num);letter-spacing:.2em;text-transform:uppercase}
+.rooms{display:flex;flex-direction:column;gap:6px}
+.room{display:flex;align-items:center;gap:12px;padding:10px 12px;border-radius:10px;background:var(--felt-2)}
+.room .code{font:800 22px var(--num);letter-spacing:.12em;color:var(--gold)}
+.room .who{flex:1;min-width:0;font-size:12px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.seats{display:flex;flex-direction:column;gap:6px}
+.seat{display:flex;align-items:center;gap:10px;font-size:14px}
+.seat img{width:28px;height:28px;border-radius:50%}
+.bigcode{font:800 48px var(--num);letter-spacing:.18em;color:var(--gold);line-height:1}
+
+#burst{position:fixed;inset:0;z-index:30;display:grid;place-items:center;pointer-events:none;
+  background:radial-gradient(circle at 50% 50%,rgba(240,191,82,.28),rgba(10,22,20,.55) 70%)}
+.burst-in{display:flex;flex-direction:column;align-items:center;gap:10px;text-align:center}
+.burst-big{font-family:var(--num);font-style:italic;font-weight:800;font-size:clamp(64px,19vw,140px);line-height:.88;
+  color:var(--gold);letter-spacing:.01em;text-shadow:0 4px 0 var(--back-2),0 10px 30px rgba(0,0,0,.55);-webkit-text-stroke:2px var(--ink)}
+.burst-sub{font-size:16px;font-weight:700;color:var(--ivory);background:var(--ink);padding:6px 16px;border-radius:999px}
+#burst.go{animation:burstfade 1.7s ease-out forwards}
+#burst.go .burst-big{animation:burstpop 1.7s cubic-bezier(.2,1.4,.4,1) forwards}
+@keyframes burstfade{0%{opacity:0}8%{opacity:1}75%{opacity:1}100%{opacity:0}}
+@keyframes burstpop{0%{transform:scale(.3) rotate(-8deg)}18%{transform:scale(1.08) rotate(-4deg)}30%{transform:scale(1) rotate(-4deg)}100%{transform:scale(1.04) rotate(-4deg)}}
+@media (prefers-reduced-motion:reduce){#burst.go .burst-big{animation:none;transform:rotate(-4deg)}}
+.ov{position:fixed;inset:0;background:rgba(10,22,20,.78);display:grid;place-items:center;z-index:20;
+  padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+.card{background:var(--felt);border:1px solid var(--rail);border-radius:14px;padding:22px 20px;max-width:420px;width:100%;
+  display:flex;flex-direction:column;gap:14px;max-height:85vh;overflow:auto}
+.card h2{margin:0;font-family:var(--num);font-style:italic;font-weight:800;font-size:34px;color:var(--ivory);text-wrap:balance}
+.card p,.card li{font-size:13px;line-height:1.7;color:var(--text);margin:0}
+.card ul{margin:0;padding-left:1.2em;display:flex;flex-direction:column;gap:4px}
+table.sc{width:100%;border-collapse:collapse;font-size:14px}
+.sc td{padding:6px 4px;border-bottom:1px solid var(--rail)}
+.sc td+td{text-align:right;font-family:var(--num);font-size:18px;font-variant-numeric:tabular-nums}
+.sc tr.win td{color:var(--gold);font-weight:700}
+.sc tr.h td{font:400 11px var(--body);color:var(--muted)}
+*,*::before,*::after{box-sizing:border-box}
+:root{padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+img{max-width:100%}
+[hidden]{display:none!important}
+.nick{display:flex;gap:8px;align-items:center}
+.nick input{flex:1;min-width:0;background:var(--felt-2);border:1px solid var(--rail);border-radius:8px;color:var(--text);padding:9px 12px;font:700 15px var(--body)}
+</style>
+</head>
+<body>
+
+<div id="app"></div>
+<div id="ov"></div>
+<div id="burst" hidden aria-live="assertive"></div>
+
+<script type="module">
+const firebaseConfig={
+  apiKey:"AIzaSyB4BnXYm0rFj4hdEaAV0l73EKPWWkW07e4",
+  authDomain:"my-compl-app.firebaseapp.com",
+  projectId:"my-compl-app",
+  storageBucket:"my-compl-app.firebasestorage.app",
+  messagingSenderId:"462474324537",
+  appId:"1:462474324537:web:413af5bc0dda4e9dd8fbe8"
+};
+// Firebase is loaded lazily so CPU mode still works if the network is down
+const FB="https://www.gstatic.com/firebasejs/10.12.2/";
+let auth,fs,signInAnonymously,onAuthStateChanged,doc,getDoc,setDoc,updateDoc,onSnapshot,collection,query,orderBy,limit,runTransaction;
+
+const ROT={6:9,9:6,16:91,91:16,18:81,81:18,19:61,61:19,66:99,99:66,68:89,89:68,86:98,98:86};
+const $=s=>document.querySelector(s);
+const esc=s=>String(s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const shuffle=a=>{for(let i=a.length-1;i>0;i--){const j=Math.random()*(i+1)|0;[a[i],a[j]]=[a[j],a[i]]}return a};
+const counts=n=>n<=4?[17,5]:n===5?[14,4]:[11,4];
+const vals=t=>ROT[t]?[t,ROT[t]]:[t];
+
+let cfg={cpus:1};
+let nick="";try{nick=localStorage.getItem("sortia-name")||""}catch(e){}
+if(!nick)nick="ゲスト"+(1000+Math.random()*9000|0);
+try{const c=JSON.parse(localStorage.getItem("sortia-cfg")||"null");if(c&&c.cpus)cfg=c}catch(e){}
+
+/* ---------- app state ---------- */
+const A={view:"home",G:null,me:0,ui:{mode:"idle",moveSel:null,orient:null,setupSel:null,setupOrient:null},
+  db:null,user:null,uid:null,dbState:"loading",rooms:[],names:{},code:null,docUnsub:null,err:"",busy:false,phaseFlip:null};
+
+/* ---------- pure game logic (works on a game object G) ---------- */
+function newG(nPlayers,scores,round,start){
+  return {phase:"setup",round:round+1,start:start??0,scores:scores||new Array(nPlayers).fill(0),
+    rows:[],pend:[],ready:[],pile:[],center:[],cur:0,held:null,log:[],flash:null,winner:null,pen:null,n:nPlayers};
+}
+function deal(G,cpuSeats){
+  const n=G.n,[nd,nu]=counts(n),bag=shuffle([...Array(100)].map((_,i)=>i+1));
+  for(let p=0;p<n;p++){
+    const down=bag.splice(0,nd),up=bag.splice(0,nu).sort((a,b)=>a-b);
+    if(cpuSeats.includes(p)){G.rows[p]=autoRow(down.map(t=>({v:null,t})),up);G.pend[p]=[];G.ready[p]=true}
+    else{G.rows[p]=down.map(t=>({v:null,t}));G.pend[p]=up;G.ready[p]=false}
+  }
+  G.pile=bag;G.cur=G.start;
+  say(G,`第${G.round}ラウンド。表タイル${nu}枚を自分の列に差し込んでください`);
+}
+function autoRow(row,up){
+  row=row.slice();
+  for(const v of up.slice().sort((a,b)=>a-b)){
+    const opts=insertSlots(row,v);if(!opts.length)continue;
+    const want=v/101*(row.length+1);
+    const i=opts.reduce((b,x)=>Math.abs(x-want)<Math.abs(b-want)?x:b,opts[0]);
+    row.splice(i,0,{v,t:v});
+  }
+  return row;
+}
+function insertSlots(row,v){ // insert-before indexes 0..len that keep face-up tiles ascending
+  const out=[];
+  for(let i=0;i<=row.length;i++){
+    let L=0,R=101;
+    for(let j=i-1;j>=0;j--)if(row[j].v!==null){L=row[j].v;break}
+    for(let j=i;j<row.length;j++)if(row[j].v!==null){R=row[j].v;break}
+    if(L<v&&v<R)out.push(i);
+  }
+  return out;
+}
+function say(G,m){G.log=[m,...G.log].slice(0,4)}
+function bounds(row,i){
+  let L=0,li=-1,R=101,ri=row.length;
+  for(let j=i-1;j>=0;j--)if(row[j].v!==null){L=row[j].v;li=j;break}
+  for(let j=i+1;j<row.length;j++)if(row[j].v!==null){R=row[j].v;ri=j;break}
+  return{L,li,R,ri};
+}
+function canPut(row,i,v){if(row[i].v!==null)return false;const b=bounds(row,i);return b.L<v&&v<b.R}
+const validSlots=(row,v)=>row.map((_,i)=>i).filter(i=>canPut(row,i,v));
+const anyPlace=(row,t)=>vals(t).some(v=>validSlots(row,v).length);
+function popPile(G){
+  if(!G.pile.length){G.pile=shuffle(G.center.splice(0));say(G,"山札が尽きたので場のタイルを混ぜ直しました")}
+  return G.pile.pop();
+}
+function placeTile(G,p,i,v,t){
+  const row=G.rows[p],old=row[i].t;
+  row[i]={v,t};
+  G.pile.splice(Math.random()*(G.pile.length+1)|0,0,old);
+  G.flash={p,i};G.held=null;G.stall=0;
+  const bonus=[i-1,i+1].some(j=>row[j]&&row[j].v!==null&&Math.abs(row[j].v-v)===1);
+  if(row.every(s=>s.v!==null)){finishRound(G,p);return}
+  if(bonus){say(G,`連番！${pname(p)}はもう1回`);G.bonus={p,id:Date.now()+"-"+(Math.random()*1e6|0),at:Date.now()};return}
+  endTurn(G);
+}
+function moveTile(row,from,to){const [s]=row.splice(from,1);if(to>from)to--;row.splice(to,0,s)}
+function endTurn(G){
+  G.cur=(G.cur+1)%G.n;G.held=null;
+  // deadlock guard: nobody has placed a tile for 15 rounds of turns -> fewest face-down tiles wins
+  G.stall=(G.stall||0)+1;
+  if(G.stall>=15*G.n){
+    const d=G.rows.map(r=>r.filter(s=>s.v===null).length),w=d.indexOf(Math.min(...d));
+    say(G,"誰もタイルを置けなくなったので、裏タイルが一番少ない人の勝ちで終了");finishRound(G,w);
+  }
+}
+function finishRound(G,w){
+  G.pen=G.rows.map(r=>r.filter(s=>s.v===null).length);
+  G.pen.forEach((x,i)=>G.scores[i]+=x);
+  G.winner=w;G.phase="over";G.held=null;
+  say(G,`${pname(w)}がコンプリート！`);
+}
+
+/* CPU */
+function evalBest(row,t){
+  let best=null;
+  for(const v of vals(t))for(const i of validSlots(row,v)){
+    const{L,li,R,ri}=bounds(row,i),step=(R-L)/(ri-li),ideal=L+step*(i-li);
+    let sc=Math.abs(v-ideal)/step;
+    if([i-1,i+1].some(j=>row[j]&&row[j].v!==null&&Math.abs(row[j].v-v)===1))sc-=1;
+    if(!best||sc<best.sc)best={i,v,sc};
+  }
+  return best;
+}
+function gaps(row){
+  const g=[];let li=-1,L=0;
+  for(let j=0;j<=row.length;j++){
+    if(j===row.length||row[j].v!==null){
+      const R=j===row.length?101:row[j].v,k=j-li-1;
+      g.push({li,ri:j,k,room:R-L-1});
+      if(j<row.length){li=j;L=row[j].v}
+    }
+  }
+  return g;
+}
+function cpuStep(G){
+  const p=G.cur,row=G.rows[p],nm=pname(p);
+  // numbers still obtainable = tiles not face-up in anyone's row (either orientation)
+  const used=new Set(G.rows.flat().filter(s=>s.v!==null).map(s=>s.t)),avail=new Set();
+  for(let t=1;t<=100;t++)if(!used.has(t))vals(t).forEach(v=>avail.add(v));
+  const g=gaps(row).map(x=>{const L=x.li<0?0:row[x.li].v,R=x.ri>=row.length?101:row[x.ri].v;let c=0;for(let v=L+1;v<R;v++)if(avail.has(v))c++;return{...x,free:c-x.k}});
+  const over=g.find(x=>x.k>0&&x.free<0);
+  if(over){
+    const tgt=g.filter(x=>x!==over).sort((a,b)=>b.free-a.free)[0];
+    if(tgt&&tgt.free>0){moveTile(row,over.li+1,tgt.li+1);G.flash=null;say(G,`${nm}は裏タイルを移動`);endTurn(G);return}
+  }
+  let pick=null;
+  G.center.forEach((t,k)=>{const b=evalBest(row,t);if(b&&b.sc<.55&&(!pick||b.sc<pick.b.sc))pick={k,t,b}});
+  if(pick){G.center.splice(pick.k,1);say(G,`${nm}は場の${pick.t}を取って${pick.b.v===pick.t?"":pick.b.v+"として"}配置`);placeTile(G,p,pick.b.i,pick.b.v,pick.t);return}
+  const t=popPile(G),b=evalBest(row,t);
+  if(b&&b.sc<=.9){say(G,`${nm}は${t}を引いて${b.v===t?"":b.v+"として"}配置`);placeTile(G,p,b.i,b.v,t);return}
+  G.center.push(t);G.flash=null;say(G,`${nm}は${t}を引いて場に出した`);endTurn(G);
+}
+
+/* ---------- names / seats ---------- */
+function pname(p){
+  if(A.view==="game"){return p===0?"あなた":`CPU ${p}`}
+  const uid=A.G&&A.G.seats?A.G.seats[p]:null;
+  if(uid&&uid===A.uid)return "あなた";
+  return (uid&&A.names[uid])||`プレイヤー${p+1}`;
+}
+const isOnline=()=>A.view==="online";
+const isCpuSeat=p=>A.view==="game"&&p!==0;
+
+/* ---------- persistence ---------- */
+let writeChain=Promise.resolve();
+function toDoc(G){
+  const o=a=>Object.fromEntries(a.map((x,i)=>[String(i),x]));
+  return {phase:G.phase,round:G.round,start:G.start,scores:G.scores,rows:o(G.rows),pend:o(G.pend),ready:o(G.ready),
+    pile:G.pile,center:G.center,cur:G.cur,held:G.held,log:G.log,flash:G.flash,stall:G.stall||0,bonus:G.bonus||null,winner:G.winner,pen:G.pen,n:G.n,updated:Date.now()};
+}
+function fromDoc(d){
+  const n=d.n||(d.seats||[]).length,arr=(o,f)=>[...Array(n)].map((_,i)=>o&&o[i]!==undefined?o[i]:f);
+  return {...d,n,rows:arr(d.rows,[]),pend:arr(d.pend,[]),ready:arr(d.ready,false),scores:d.scores||new Array(n).fill(0),
+    log:d.log||[],center:d.center||[],pile:d.pile||[]};
+}
+function gameRef(){return doc(fs,"games",A.code)}
+function write(data){
+  const ref=gameRef();
+  writeChain=writeChain.then(()=>updateDoc(ref,{...data,updated:Date.now()})).catch(e=>{
+    A.err=e&&e.code==="permission-denied"?"保存できませんでした（この部屋のメンバーではありません）。":"通信エラーで保存できませんでした。電波の良いところでもう一度試してください。";
+    render();
+  });
+  return writeChain;
+}
+/* commit after a local action */
+function commit(scope){
+  const G=A.G;
+  if(isOnline()){
+    if(scope==="setup"){const me=String(A.me);write({["rows."+me]:G.rows[A.me],["pend."+me]:G.pend[A.me],["ready."+me]:G.ready[A.me]})}
+    else{const d=toDoc(G);write(d)}
+    render();if(G.phase==="over")showEnd();return;
+  }
+  render();
+  if(G.phase==="over"){showEnd();return}
+  scheduleCpu();
+}
+let cpuTimer=null;
+function scheduleCpu(){
+  clearTimeout(cpuTimer);
+  const G=A.G;
+  if(A.view!=="game"||G.phase!=="play"||!isCpuSeat(G.cur))return;
+  cpuTimer=setTimeout(()=>{if(A.view!=="game")return;cpuStep(A.G);commit()},900);
+}
+
+/* ---------- local (CPU) game ---------- */
+function startCpuGame(){
+  A.view="game";A.me=0;resetUi();
+  const n=cfg.cpus+1,G=newG(n,null,0,0);G.players=n;
+  deal(G,[...Array(n).keys()].slice(1));A.G=G;render();
+}
+function nextCpuRound(){
+  const P=A.G,G=newG(P.n,P.scores,P.round,(P.start+1)%P.n);
+  deal(G,[...Array(P.n).keys()].slice(1));A.G=G;resetUi();closeOv();render();
+}
+function resetUi(){A.ui={mode:"idle",moveSel:null,orient:null,setupSel:null,setupOrient:null};A.err=""}
+
+/* ---------- online ---------- */
+async function initDb(){
+  try{
+    const [appM,authM,fsM]=await Promise.all([import(FB+"firebase-app.js"),import(FB+"firebase-auth.js"),import(FB+"firebase-firestore.js")]);
+    ({signInAnonymously,onAuthStateChanged}=authM);
+    ({doc,getDoc,setDoc,updateDoc,onSnapshot,collection,query,orderBy,limit,runTransaction}=fsM);
+    const app=appM.initializeApp(firebaseConfig);auth=authM.getAuth(app);fs=fsM.getFirestore(app);
+  }catch(e){A.dbState="none";render();return}
+  onAuthStateChanged(auth,u=>{
+    if(!u)return;
+    A.uid=u.uid;A.dbState="ok";
+    onSnapshot(query(collection(fs,"games"),orderBy("created","desc"),limit(30)),s=>{
+      A.rooms=s.docs.map(d=>({id:d.id,...d.data()}));
+      A.rooms.forEach(r=>Object.assign(A.names,r.names||{}));
+      if(A.view==="lobby")render();
+    },()=>{});
+    render();
+  });
+  signInAnonymously(auth).catch(e=>{A.dbState="none";A.authErr=e&&e.code||"";render()});
+}
+function enterRoom(code){
+  A.code=code;A.view="online";resetUi();A.G=null;
+  try{localStorage.setItem("sortia-room",code)}catch(e){}
+  if(A.docUnsub)A.docUnsub();
+  A.docUnsub=onSnapshot(gameRef(),s=>{
+    if(!s.exists()){A.G=null;render();return}
+    const d=s.data(),prevPhase=A.G&&A.G.phase,prevRound=A.G&&A.G.round;
+    A.G=fromDoc(d);A.me=(d.seats||[]).indexOf(A.uid);
+    Object.assign(A.names,d.names||{});
+    if(prevRound!==A.G.round)resetUi();
+    if(A.G.cur!==A.me&&A.ui.mode!=="idle")A.ui.mode="idle";
+    render();
+    if(A.G.phase==="over"&&prevPhase!=="over"&&d.status==="play")showEnd();
+    maybeFlipToPlay(d);
+  },e=>{A.err="ゲームを読み込めませんでした。";render()});
+  render();
+}
+function maybeFlipToPlay(d){
+  // all players ready -> host moves the game into play (once per round)
+  const G=A.G;
+  if(d.status!=="play"||G.phase!=="setup"||A.me!==0)return;
+  if(!G.ready.every(Boolean)||A.phaseFlip===G.round)return;
+  A.phaseFlip=G.round;
+  write({phase:"play",log:[`全員そろいました。${pname(G.start)}から開始`,...G.log].slice(0,4)});
+}
+async function createRoom(){
+  if(A.busy)return;A.busy=true;render();
+  try{
+    let code="";
+    for(let k=0;k<6;k++){
+      code=[...Array(4)].map(()=>"ABCDEFGHJKLMNPQRSTUVWXYZ23456789"[Math.random()*32|0]).join("");
+      const s=await getDoc(doc(fs,"games",code));if(!s.exists())break;
+    }
+    await setDoc(doc(fs,"games",code),{code,host:A.uid,seats:[A.uid],names:{[A.uid]:nick},status:"lobby",created:Date.now(),updated:Date.now()});
+    enterRoom(code);
+  }catch(e){A.err="部屋を作れませんでした。もう一度試してください。";render()}
+  A.busy=false;render();
+}
+async function joinRoom(code){
+  code=(code||"").trim().toUpperCase();if(!code)return;
+  if(A.busy)return;A.busy=true;A.err="";render();
+  try{
+    const ref=doc(fs,"games",code);
+    const res=await runTransaction(fs,async tx=>{
+      const snap=await tx.get(ref);
+      if(!snap.exists())return "none";
+      const d=snap.data(),seats=d.seats||[];
+      if(seats.includes(A.uid)||d.status!=="lobby")return "enter"; // already in, or watch as spectator
+      if(seats.length>=6)return "full";
+      tx.update(ref,{seats:[...seats,A.uid],["names."+A.uid]:nick,updated:Date.now()});
+      return "joined";
+    });
+    A.busy=false;
+    if(res==="none"){A.err=`部屋 ${code} は見つかりませんでした。`;render();return}
+    if(res==="full"){A.err=`部屋 ${code} は満員です（6人まで）。`;render();return}
+    enterRoom(code);
+  }catch(e){A.err="参加できませんでした。もう一度試してください。";A.busy=false;render()}
+}
+function hostStart(){
+  const d=A.G,n=(d.seats||[]).length;if(n<2)return;
+  const G=newG(n,null,0,Math.random()*n|0);deal(G,[]);
+  write({...toDoc(G),status:"play"});
+}
+function hostNextRound(){
+  const P=A.G,G=newG(P.n,P.scores,P.round,(P.start+1)%P.n);deal(G,[]);
+  A.phaseFlip=null;closeOv();write(toDoc(G));
+}
+function leaveRoom(){
+  const d=A.G;
+  if(d&&d.status==="lobby"&&A.me>0)write({seats:d.seats.filter(x=>x!==A.uid)});
+  if(A.docUnsub)A.docUnsub();A.docUnsub=null;A.code=null;A.G=null;A.view="lobby";
+  try{localStorage.removeItem("sortia-room")}catch(e){}
+  closeOv();render();
+}
+
+/* ---------- input ---------- */
+document.addEventListener("click",e=>{
+  const el=e.target.closest("[data-act]");if(!el)return;
+  const a=el.dataset.act,G=A.G,ui=A.ui;
+  // navigation
+  if(a==="cpus"){cfg.cpus=+el.dataset.n;try{localStorage.setItem("sortia-cfg",JSON.stringify(cfg))}catch(_){}render();return}
+  if(a==="cpuStart"){startCpuGame();return}
+  if(a==="home"){if(A.docUnsub)A.docUnsub();A.docUnsub=null;clearTimeout(cpuTimer);A.view="home";A.G=null;A.err="";closeOv();render();return}
+  if(a==="lobby"){A.view="lobby";A.err="";render();return}
+  if(a==="create"){createRoom();return}
+  if(a==="join"){joinRoom(el.dataset.code||($("#code")||{}).value);return}
+  if(a==="leave"){leaveRoom();return}
+  if(a==="hostStart"){hostStart();return}
+  if(a==="next"){if(isOnline()){if(A.me===0)hostNextRound()}else nextCpuRound();return}
+  if(a==="rules"){showRules();return}
+  if(a==="close"){closeOv();return}
+  if(a==="copy"){const t=el.dataset.code;navigator.clipboard.writeText(t).then(()=>{el.textContent="コピーしました"},()=>{});return}
+  if(!G||A.me<0)return;
+  const me=A.me,row=G.rows[me];
+
+  // setup: insert face-up tiles
+  if(G.phase==="setup"&&!G.ready[me]){
+    if(a==="pend"){const k=+el.dataset.k;ui.setupSel=ui.setupSel===k?null:k;ui.setupOrient=G.pend[me][k];render();return}
+    if(a==="sorient"){ui.setupOrient=+el.dataset.v;render();return}
+    if(a==="slot"||a==="end"){
+      const i=a==="end"?row.length:+el.dataset.i;
+      if(ui.setupSel===null){ // tap a face-up tile to take it back
+        if(a==="slot"&&row[i].v!==null){G.pend[me].push(row[i].t);G.pend[me].sort((x,y)=>x-y);row.splice(i,1);commit("setup")}
+        return;
+      }
+      const t=G.pend[me][ui.setupSel],v=ui.setupOrient??t;
+      if(!insertSlots(row,v).includes(i))return;
+      row.splice(i,0,{v,t});G.pend[me].splice(ui.setupSel,1);ui.setupSel=G.pend[me].length?0:null;
+      ui.setupOrient=ui.setupSel===null?null:G.pend[me][0];commit("setup");return;
+    }
+    if(a==="auto"){G.rows[me]=autoRow(row,G.pend[me]);
+      const placed=new Set(G.rows[me].filter(s=>s.v!==null).map(s=>s.t));G.pend[me]=G.pend[me].filter(t=>!placed.has(t));
+      ui.setupSel=G.pend[me].length?0:null;commit("setup");return}
+    if(a==="ready"&&!G.pend[me].length){
+      G.ready[me]=true;ui.setupSel=null;
+      if(!isOnline()&&G.ready.every(Boolean)){G.phase="play";say(G,`${pname(G.start)}から開始`)}
+      commit("setup");return}
+    return;
+  }
+  if(G.phase!=="play"||G.cur!==me)return;
+  const holding=G.held;
+  if(a==="draw"&&!holding&&ui.mode==="idle"){
+    const t=popPile(G);G.held={t,from:"pile"};ui.orient=vals(t).find(v=>validSlots(row,v).length)??t;
+    say(G,`${pname(me)}は山札から${t}を引いた`);commit();return}
+  if(a==="take"&&!holding&&ui.mode==="idle"){
+    const k=+el.dataset.k,t=G.center[k];if(!anyPlace(row,t))return;
+    G.center.splice(k,1);G.held={t,from:"center"};ui.orient=vals(t).find(v=>validSlots(row,v).length);commit();return}
+  if(a==="orient"){ui.orient=+el.dataset.v;render();return}
+  if(a==="discard"&&holding&&holding.from==="pile"){
+    G.center.push(holding.t);say(G,`${pname(me)}は${holding.t}を場に出した`);G.flash=null;endTurn(G);commit();return}
+  if(a==="cancel"){
+    if(holding&&holding.from==="center"){G.center.push(holding.t);G.held=null;commit();return}
+    ui.mode="idle";ui.moveSel=null;render();return}
+  if(a==="move"&&!holding&&ui.mode==="idle"){ui.mode="moving";ui.moveSel=null;render();return}
+  if(a==="moveEnd"&&ui.mode==="moving"&&ui.moveSel!==null){
+    moveTile(row,ui.moveSel,row.length);say(G,`${pname(me)}は裏タイルを移動`);G.flash=null;ui.mode="idle";endTurn(G);commit();return}
+  if(a==="slot"){
+    const i=+el.dataset.i;
+    if(holding){
+      let v=ui.orient;
+      if(!canPut(row,i,v)){const alt=vals(holding.t).find(x=>canPut(row,i,x));if(alt===undefined)return;v=alt}
+      const t=holding.t;say(G,`${pname(me)}は${t}を${v!==t?v+"として":""}配置`);placeTile(G,me,i,v,t);commit();return}
+    if(ui.mode==="moving"){
+      if(ui.moveSel===null){if(row[i].v===null){ui.moveSel=i;render()}return}
+      if(i===ui.moveSel){ui.moveSel=null;render();return}
+      moveTile(row,ui.moveSel,i);say(G,`${pname(me)}は裏タイルを移動`);G.flash=null;ui.mode="idle";endTurn(G);commit();return}
+  }
+});
+document.addEventListener("change",e=>{
+  if(e.target.id!=="nick")return;
+  const v=e.target.value.trim().slice(0,12);if(!v)return;
+  nick=v;try{localStorage.setItem("sortia-name",nick)}catch(_){}
+});
+document.addEventListener("keydown",e=>{if(e.key==="Enter"&&e.target.id==="code")joinRoom(e.target.value)});
+
+/* ---------- render ---------- */
+const app=$("#app");
+function tileHTML(s,cls,attrs){
+  const rot=s.v!==null&&s.v!==s.t;
+  return `<button class="tile ${s.v===null?"down":""} ${rot?"rot":""} ${cls}" ${attrs}>${s.v===null?"":s.v}</button>`;
+}
+function render(){
+  checkBonus();
+  if(A.view==="home")return renderHome();
+  if(A.view==="lobby")return renderLobby();
+  if(A.view==="online"&&(!A.G||A.G.status==="lobby"))return renderWaiting();
+  renderGame();
+}
+const LOGO=`<h1 class="logo">SORT<span>IA</span></h1>`;
+function renderHome(){
+  let last=null;try{last=localStorage.getItem("sortia-room")}catch(e){}
+  app.innerHTML=`
+  <section class="hero"><h1>SORT<span>IA</span></h1>
+    <p>1〜100のタイルを、左から小さい順に全部表向きでそろえたら勝ち。</p>
+    <div class="deco">${[7,23,41,58,86].map((v,i)=>i===2?`<span class="tile down"></span>`:`<span class="tile">${v}</span>`).join("")}</div></section>
+  <div class="box"><h2>CPUと対戦</h2>
+    <div class="seg">${[1,2,3].map(n=>`<button class="btn ${cfg.cpus===n?"on":""}" data-act="cpus" data-n="${n}">CPU ${n}人</button>`).join("")}</div>
+    <div class="btns"><button class="btn primary" data-act="cpuStart">はじめる</button></div></div>
+  <div class="box"><h2>オンライン対戦</h2>
+    <div class="nick"><span class="label">名前</span><input id="nick" maxlength="12" autocomplete="nickname" value="${esc(nick)}" aria-label="ニックネーム"></div>
+    ${A.dbState==="ok"?`<p>部屋を作って4文字のコードを友達に伝えるか、友達の部屋に参加します。2〜6人で遊べます。</p>
+      <div class="btns"><button class="btn primary" data-act="lobby">ロビーへ</button>${last?`<button class="btn" data-act="join" data-code="${esc(last)}">部屋 ${esc(last)} に戻る</button>`:""}</div>`
+    :A.dbState==="loading"?`<p>接続を確認しています…</p>`
+    :`<p>サーバーに接続できませんでした。通信状態を確認して、ページを再読み込みしてください。</p>`}
+  </div>
+  <div class="btns"><button class="link" data-act="rules">ルール</button></div>`;
+}
+function renderLobby(){
+  const mine=A.rooms.filter(r=>(r.seats||[]).includes(A.uid)&&r.status!=="lobby"&&Date.now()-(r.updated||0)<864e5);
+  const open=A.rooms.filter(r=>r.status==="lobby"&&Date.now()-(r.updated||0)<36e5*3);
+  const roomRow=(r,label)=>`<div class="room"><span class="code">${esc(r.code)}</span>
+    <span class="who">${(r.seats||[]).map(u=>esc(u===A.uid?"あなた":A.names[u]||"プレイヤー")).join("・")}（${(r.seats||[]).length}人）</span>
+    <button class="btn ${label==="参加"?"primary":""}" data-act="join" data-code="${esc(r.code)}">${label}</button></div>`;
+  app.innerHTML=`
+  <header>${LOGO}<div class="meta"><button class="link" data-act="home">ホーム</button></div></header>
+  <div class="box"><h2>部屋を作る</h2><p>作ったら表示されるコードを友達に送ってください。</p>
+    <div class="btns"><button class="btn primary" data-act="create" ${A.busy?"disabled":""}>部屋を作る</button></div></div>
+  <div class="box"><h2>コードで参加</h2>
+    <div class="join"><input id="code" maxlength="4" autocomplete="off" placeholder="ABCD" aria-label="部屋コード"><button class="btn primary" data-act="join" ${A.busy?"disabled":""}>参加</button></div>
+    ${A.err?`<div class="err">${esc(A.err)}</div>`:""}</div>
+  ${mine.length?`<div class="box"><h2>参加中のゲーム</h2><div class="rooms">${mine.map(r=>roomRow(r,"戻る")).join("")}</div></div>`:""}
+  <div class="box"><h2>募集中の部屋</h2>
+    ${open.length?`<div class="rooms">${open.map(r=>roomRow(r,(r.seats||[]).includes(A.uid)?"戻る":"参加")).join("")}</div>`:`<p>いま募集中の部屋はありません。</p>`}</div>`;
+}
+function renderWaiting(){
+  const d=A.G;
+  if(!d){app.innerHTML=`<header>${LOGO}<div class="meta"><button class="link" data-act="leave">ロビーへ</button></div></header><div class="box"><p>読み込み中…</p></div>`;return}
+  const seats=d.seats||[],host=seats[0]===A.uid;
+  app.innerHTML=`
+  <header>${LOGO}<div class="meta"><button class="link" data-act="leave">退出</button></div></header>
+  <div class="box"><div class="label">部屋コード</div><div class="bigcode">${esc(d.code)}</div>
+    <div class="btns"><button class="btn" data-act="copy" data-code="${esc(d.code)}">コードをコピー</button></div>
+    <p>友達はホームの「オンライン対戦」→「コードで参加」からこのコードを入れます。</p></div>
+  <div class="box"><h2>参加者 ${seats.length}/6</h2>
+    <div class="seats">${seats.map((u,i)=>`<div class="seat">${esc(u===A.uid?"あなた":A.names[u]||"プレイヤー"+(i+1))}${i===0?' <span class="label">ホスト</span>':""}</div>`).join("")}</div>
+    ${host?`<div class="btns"><button class="btn primary" data-act="hostStart" ${seats.length<2?"disabled":""}>ゲーム開始</button></div>
+      ${seats.length<2?`<p>あと1人以上集まると開始できます。</p>`:""}`
+      :seats.includes(A.uid)?`<p>ホストが開始するのを待っています…</p>`:`<p>この部屋には参加していません。</p>`}
+    ${A.err?`<div class="err">${esc(A.err)}</div>`:""}</div>`;
+}
+function renderGame(){
+  const G=A.G,me=A.me,ui=A.ui,seated=me>=0;
+  const myRow=seated?G.rows[me]:[];
+  const inSetup=G.phase==="setup",mySetup=seated&&inSetup&&!G.ready[me];
+  const myTurn=seated&&G.phase==="play"&&G.cur===me;
+  const holding=myTurn?G.held:null;
+  if(holding&&!vals(holding.t).includes(ui.orient))ui.orient=vals(holding.t).find(v=>validSlots(myRow,v).length)??holding.t;
+  const okSlots=holding?validSlots(myRow,ui.orient):[];
+
+  const others=[...Array(G.n).keys()].filter(p=>p!==me);
+  const opps=others.map(p=>{
+    const row=G.rows[p]||[],down=row.filter(s=>s.v===null).length;
+    const tag=inSetup?(G.ready[p]?"準備OK":"準備中…"):`裏 ${down}枚`;
+    return `<div class="opp ${G.phase==="play"&&G.cur===p?"turn":""}">
+      <div class="opp-head"><b>${esc(pname(p))}</b><span>${tag} ・ 累計 −${G.scores[p]||0}</span></div>
+      <div class="mini">${row.map((s,i)=>`<i class="${s.v===null?"d":""} ${G.flash&&G.flash.p===p&&G.flash.i===i?"f":""}">${s.v??""}</i>`).join("")}</div></div>`}).join("");
+
+  const pool=G.center.length?G.center.map((t,k)=>{
+    const ok=myTurn&&!holding&&ui.mode==="idle"&&anyPlace(myRow,t);
+    return tileHTML({v:t,t},ok?"":"dim",`data-act="take" data-k="${k}" aria-label="場の${t}を取る" ${ok?"":"tabindex=-1"}`)}).join("")
+    :`<span class="empty">まだありません</span>`;
+
+  let status="",held="",btns="",pend="";
+  if(!seated)status=`観戦中<small>${G.phase==="play"?esc(pname(G.cur))+"の番です":""}</small>`;
+  else if(G.phase==="over")status="ラウンド終了";
+  else if(inSetup&&G.ready[me])status=`準備完了<small>ほかのプレイヤーを待っています…</small>`;
+  else if(mySetup){
+    const P=G.pend[me];
+    if(P.length){
+      const sel=ui.setupSel;
+      status=sel===null?`表タイルを選んでください<small>選んだら、差し込みたい場所のすぐ右のタイルをタップ。置いた表タイルをタップすると戻せます</small>`
+        :`光っているタイルの左に差し込みます<small>一番右に置くときは「右端に置く」</small>`;
+      pend=`<div class="pend">${P.map((t,k)=>tileHTML({v:t,t},sel===k?"sel":"",`data-act="pend" data-k="${k}" aria-label="${t}を選ぶ"`)).join("")}</div>`;
+      if(sel!==null&&ROT[P[sel]])btns+=vals(P[sel]).map(v=>`<button class="btn ${ui.setupOrient===v?"on":""}" data-act="sorient" data-v="${v}">${v}として使う</button>`).join("");
+      if(sel!==null)btns+=`<button class="btn" data-act="end" ${insertSlots(myRow,ui.setupOrient??P[sel]).includes(myRow.length)?"":"disabled"}>右端に置く</button>`;
+      btns+=`<button class="btn" data-act="auto">おまかせ配置</button>`;
+    }else{
+      status=`配置できました<small>表タイルをタップすると戻してやり直せます</small>`;
+      btns=`<button class="btn primary" data-act="ready">これで確定</button>`;
+    }
+  }
+  else if(!myTurn)status=`${esc(pname(G.cur))}の番です${isCpuSeat(G.cur)?"…":""}<small>${G.held?`${esc(pname(G.cur))}が ${G.held.t} を持っています`:""}</small>`;
+  else if(holding){
+    const t=holding.t,can=anyPlace(myRow,t);
+    held=`<button class="tile" tabindex="-1">${ui.orient??t}</button>`;
+    if(can){
+      status=`光っている裏タイルと入れ替えられます<small>${holding.from==="pile"?"置かない場合は場に出して手番終了":"場から取ったタイルは置く必要があります"}</small>`;
+      if(ROT[t])btns+=vals(t).map(v=>`<button class="btn ${ui.orient===v?"on":""}" data-act="orient" data-v="${v}">${v}として使う</button>`).join("");
+      btns+=holding.from==="pile"?`<button class="btn" data-act="discard">場に出す</button>`:`<button class="btn" data-act="cancel">やめる</button>`;
+    }else{
+      status=`${t}を置ける場所がありません<small>表向きのまま場に出して手番終了です</small>`;
+      btns=`<button class="btn primary" data-act="discard">場に出す</button>`;
+    }
+  }else if(ui.mode==="moving"){
+    status=ui.moveSel===null?`移動する裏タイルを選んでください`:`移動先のタイルをタップ<small>そのタイルの位置に差し込まれます</small>`;
+    btns=(ui.moveSel!==null?`<button class="btn" data-act="moveEnd">右端へ移動</button>`:"")+`<button class="btn" data-act="cancel">やめる</button>`;
+  }else{
+    status=`あなたの番です<small>山札から引く／場の表タイルを取る／裏タイルを移動する、のどれか1つ</small>`;
+    btns=`<button class="btn" data-act="move">裏タイルを移動</button>`;
+  }
+  if(G.phase==="over"&&seated)btns=isOnline()&&me!==0?`<span class="label">ホストが次のラウンドを始めるのを待っています</span>`:`<button class="btn primary" data-act="next">次のラウンド</button>`;
+
+  let setupTargets=[];
+  if(mySetup&&ui.setupSel!==null)setupTargets=insertSlots(myRow,ui.setupOrient??G.pend[me][ui.setupSel]);
+  const rowHTML=myRow.map((s,i)=>{
+    let cls="";
+    if(holding&&okSlots.includes(i))cls="ok";
+    if(mySetup&&setupTargets.includes(i))cls="ok";
+    if(ui.mode==="moving"&&ui.moveSel===null&&s.v===null&&myTurn)cls="ok";
+    if(ui.mode==="moving"&&ui.moveSel===i)cls="sel";
+    if(G.flash&&G.flash.p===me&&G.flash.i===i)cls+=" flash";
+    return tileHTML(s,cls,`data-act="slot" data-i="${i}" aria-label="${i+1}番目 ${s.v??"裏"}"`)}).join("");
+
+  const myDown=myRow.filter(s=>s.v===null).length;
+  app.innerHTML=`
+  <header>${LOGO}
+    <div class="meta">${isOnline()?`部屋 ${esc(A.code)} ・ `:""}第${G.round}R<button class="link" data-act="rules">ルール</button>
+    <button class="link" data-act="${isOnline()?"leave":"home"}">${isOnline()?"ロビー":"ホーム"}</button></div></header>
+  <div class="opps">${opps}</div>
+  ${inSetup?"":`<div class="mid">
+    <div class="pile"><button class="tile down ${myTurn&&!holding&&ui.mode==="idle"?"ok":""}" data-act="draw" aria-label="山札から引く"></button>山札 ${G.pile.length}</div>
+    <div class="pool"><div class="label">場の表タイル（誰でも取れる）</div><div class="pool-tiles">${pool}</div></div></div>`}
+  <div class="panel">
+    <div class="held">${held}<div class="status">${status}</div></div>
+    ${pend}${btns?`<div class="btns">${btns}</div>`:""}
+    ${A.err?`<div class="err">${esc(A.err)}</div>`:""}
+  </div>
+  ${seated?`<div class="mine-head"><b>あなたの列</b><span>裏 ${myDown}枚 ・ 累計 −${G.scores[me]||0}</span></div>
+  <div class="row">${rowHTML}</div>
+  <div class="dir">左上 → 右下 の順に小さい数から大きい数へ</div>`:""}
+  <div class="log">${G.log.map(m=>`<div>${esc(m)}</div>`).join("")}</div>`;
+}
+
+/* ---------- overlays ---------- */
+const ov=$("#ov");
+/* ONE MORE TURN! burst — shown once per bonus, on every player's screen */
+let seenBonus=null,burstTimer=null;
+function checkBonus(){
+  const b=A.G&&A.G.bonus;
+  if(!b||b.id===seenBonus||(A.view!=="game"&&A.view!=="online"))return;
+  seenBonus=b.id;
+  if(Date.now()-(b.at||0)>6000)return; // stale (e.g. just joined the room)
+  const who=b.p===A.me?"あなたはもう1回":pname(b.p)+"がもう1回";
+  const el=$("#burst");
+  el.innerHTML=`<div class="burst-in"><div class="burst-big">ONE MORE<br>TURN!</div><div class="burst-sub">${esc(who)}</div></div>`;
+  el.hidden=false;el.classList.remove("go");void el.offsetWidth;el.classList.add("go");
+  clearTimeout(burstTimer);burstTimer=setTimeout(()=>{el.hidden=true},1700);
+}
+function closeOv(){ov.innerHTML=""}
+function showRules(){
+  ov.innerHTML=`<div class="ov"><div class="card">
+    <h2>ルール</h2>
+    <ul>
+      <li>各自、裏向きのタイル（2〜4人なら17枚）を1列に並べ、さらに表向きのタイル5枚を好きな場所に差し込みます。表タイルは左から小さい順に。</li>
+      <li>手番では次のどれか1つを行います。</li>
+      <li><b>山札から1枚引く</b>：自分の列の裏タイルと入れ替えます。外した裏タイルは山札へ戻ります。置けない・置かないときは表のまま場に出します。</li>
+      <li><b>場の表タイルを取る</b>：同じように裏タイルと入れ替えます。</li>
+      <li><b>裏タイルを移動</b>：自分の裏タイル1枚を好きな位置へ差し込みます。</li>
+      <li>置いたタイルが隣と連番（例：31と32）になったら、もう1回手番。</li>
+      <li>6/9、18/81など逆さにすると別の数になるタイルは、どちらの数として使ってもOK（下線つきで表示）。</li>
+      <li>最初に全部表にした人の勝ち。他の人は残った裏タイルの数がマイナス点になります。</li>
+    </ul>
+    <div class="btns"><button class="btn primary" data-act="close">OK</button></div>
+  </div></div>`;
+}
+function showEnd(){
+  const G=A.G,w=G.winner;
+  const rows=[...Array(G.n).keys()].map(i=>`<tr class="${i===w?"win":""}"><td>${esc(pname(i))}</td><td>−${G.pen[i]}</td><td>−${G.scores[i]}</td></tr>`).join("");
+  const canNext=!isOnline()||A.me===0;
+  ov.innerHTML=`<div class="ov"><div class="card">
+    <h2>${w===A.me?"コンプリート！":esc(pname(w))+"の勝ち"}</h2>
+    <table class="sc"><tr class="h"><td></td><td>今回</td><td>累計</td></tr>${rows}</table>
+    <div class="btns">${canNext?`<button class="btn primary" data-act="next">次のラウンド</button>`:""}<button class="btn" data-act="close">盤面を見る</button></div>
+  </div></div>`;
+}
+
+render();
+initDb();
+</script>
+</body>
+</html>
